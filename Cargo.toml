@@ -1,5 +1,5 @@
 [package]
-name = "cve_feed"
+name = "discord_cve_feed"
 version = "0.1.0"
 edition = "2021"
 
