@@ -1,4 +1,4 @@
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq, Ord, PartialOrd)]
 pub struct Cve {
     pub id: String,
     pub description: String,
@@ -6,9 +6,6 @@ pub struct Cve {
 
 impl Cve {
     pub fn new(id: String, description: String) -> Self {
-        Cve {
-            id,
-            description,
-        }
+        Cve { id, description }
     }
 }

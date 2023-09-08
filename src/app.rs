@@ -1,7 +1,7 @@
-use crate::config::State;
-
 use super::config::Configuration;
 use super::cve::Cve;
+use super::banner::print_banner;
+use crate::config::State;
 use console::style;
 use reqwest::blocking::Client;
 use serde_json::json;
@@ -10,39 +10,40 @@ pub fn run() {
     // Instantiate application state to store config, last timestamp and last set of CVE's
     let mut app_state = State::new();
 
+    // Print Banner
+    print_banner();
+
     println!(
         "[+] Starting @ {}",
         style(app_state.last_timestamp.clone()).green()
     );
 
     loop {
-        // Check for CVEs
         println!("[+] Checking for new CVEs...");
 
-        // Query NIST for new CVEs
-        let cves = query_cves(app_state.last_timestamp.clone());
-
-        // Filter what we get back
-        let cves = filter(&app_state.config, cves, &app_state.last_cves);
-            match cves.len() {
-                0 => {
-                    println!("[+] No new or relevant CVE's found. Waiting for {} minutes before next check...", style(&app_state.config.time.to_string()).green());
-                    app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                    std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
-                    continue;
-                }
-                _ => {
-                    message(&app_state.config.webhook, &cves);
-                    println!(
-                        "[+] Sent {} new CVE's to Discord. Waiting for {} minutes before next check...",
-                        style(cves.len().to_string()).green(),
-                        style(&app_state.config.time.to_string()).green()
-                    );
-                    app_state.last_cves = cves;
-                    app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                    std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
-                }
+        // Query CVE's & Filter Results
+        let cves = filter(
+            &app_state.config,
+            query_cves(app_state.last_timestamp.clone()),
+        );
+        match cves.len() {
+            0 => {
+                println!("[+] No new or relevant CVE's found. Waiting for {} minutes before next check...", style(&app_state.config.time.to_string()).green());
+                app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
+                continue;
             }
+            _ => {
+                message(&app_state.config.webhook, &cves);
+                println!(
+                    "[+] Sent {} new CVE's to Discord. Waiting for {} minutes before next check...",
+                    style(cves.len().to_string()).green(),
+                    style(&app_state.config.time.to_string()).green()
+                );
+                app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
+            }
+        }
     }
 }
 
@@ -78,29 +79,28 @@ async fn query_cves(last_timestamp: String) -> Vec<Cve> {
     cves
 }
 
-fn filter(config: &Configuration, cves: Vec<Cve>, last_cves: &Vec<Cve>) -> Vec<Cve> {
-    let cves: Vec<Cve> = cves
+fn filter(config: &Configuration, cves: Vec<Cve>) -> Vec<Cve> {
+    let mut cves: Vec<Cve> = cves
         .into_iter()
         .filter(|cve| {
-            // Doesn't contain any CVE's from the previous check
-            // TODO: Make sure it's not pushing the same CVE to the vector if it contains two of the keywords.
-            !last_cves.contains(cve) && {
-                let keywords: Vec<&str> = config.keywords.split(",").collect();
-                // Contains the keywords
-                for keyword in keywords {
-                    if cve
-                        .description
-                        .to_lowercase()
-                        .contains(keyword.to_lowercase().as_str())
-                    {
-                        return true;
-                    }
+            let keywords: Vec<&str> = config.keywords.split(",").collect();
+            // Makes sure it contains the keywords
+            for keyword in keywords {
+                if cve
+                    .description
+                    .to_lowercase()
+                    .contains(keyword.to_lowercase().as_str())
+                {
+                    return true;
                 }
-                return false;
             }
+            return false;
         })
         .collect();
 
+    // Sort and remove duplicates
+    cves.sort();
+    cves.dedup();
     return cves;
 }
 

@@ -1,10 +1,8 @@
 use clap::Parser;
-use super::cve::Cve;
 
 pub struct State {
     pub config: Configuration,
     pub last_timestamp: String,
-    pub last_cves: Vec<Cve>,
 }
 
 impl State {
@@ -12,7 +10,6 @@ impl State {
         State {
             config: Configuration::new(),
             last_timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            last_cves: Vec::new(),
         }
     }
 }
