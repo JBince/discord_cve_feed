@@ -51,3 +51,6 @@ git clone https://github.com/JBince/discord_cve_feed.git
 cd discord_cve_feed
 cargo build --release
 ```
+### *You will need a Discord Webhook for this to work!*
+In your Discord server:
+**Server Settings** -> **Integrations** -> **Webhooks** -> **New Webook**
