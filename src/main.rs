@@ -1,4 +1,4 @@
-use cve_feed::app;
+use discord_cve_feed::app;
 
 fn main() {
     // Run app
