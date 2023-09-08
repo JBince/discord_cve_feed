@@ -43,7 +43,8 @@ https://github.com/JBince                               ver: 0.1.0
 [+] Message Sent!
 [+] Sent 4 new CVE's to Discord. Waiting for 10 minutes before next check...
 ```
-![image](https://github.com/JBince/cve_feed/assets/66454005/5ccb4741-667b-4d5f-91cb-8964fbd238b2)
+![image](https://github.com/JBince/discord_cve_feed/assets/66454005/4c955533-6f5f-4ffa-8709-4a2ec2bb852d)
+
 
 ## Installation
 ```
