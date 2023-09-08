@@ -1,17 +1,18 @@
 use super::config::Configuration;
 use super::cve::Cve;
 use console::style;
+use reqwest::blocking::Client;
 use serde_json::json;
 
 pub fn run() {
-    // Instantiate Config
+
+    // Instantiate Config & emtpy variables for comparison
     let config = Configuration::new();
-    let start_time: String = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-
-    println!("[+] Starting @ {}", style(start_time.clone()).green());
-
+    let start_time: String = String::from("2023-09-08T06:31:38Z");
     let mut last_timestamp: String = start_time.clone();
     let mut last_cves: Vec<Cve> = Vec::new();
+
+    println!("[+] Starting @ {}", style(start_time.clone()).green());
 
     loop {
         // Check for CVEs
@@ -19,39 +20,23 @@ pub fn run() {
         let cves = check(last_timestamp.clone());
 
         if cves.len() == 0 {
-            println!("[+] No new CVEs found. Waiting for {} minutes before next check...",style(&config.time.to_string()).green());
-            // Update the starting timestamp for the next check
+            println!(
+                "[+] No new CVEs found. Waiting for {} minutes before next check...",
+                style(&config.time.to_string()).green()
+            );
             last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             std::thread::sleep(std::time::Duration::from_secs(&config.time * 60));
             continue;
         } else {
-            // Check that that the new CVEs are not in the previous list & contain at least one of the keywords
-            let cves: Vec<Cve> = cves
-                .into_iter()
-                .filter(|cve| {
-                    !last_cves.contains(cve) && {
-                        let keywords: Vec<&str> = config.keywords.split(",").collect();
-                        for keyword in keywords {
-                            if cve.description.contains(keyword) {
-                                return true;
-                            }
-                        }
-                        return false;
-                    }
-                })
-                .collect();
-
-            println!(
-                "[+] Found {} new CVEs. Sending to discord...",
-                style(cves.len().to_string()).green()
-            );
+            // Filter CVEs & send new ones to Discord
+            let cves = filter(&config, cves, last_cves);
             message(&config.webhook, &cves);
-            println!("[+] CVE's Sent. Waiting for {} minutes before next check...", style(&config.time.to_string()).green());
+            println!(
+                "[+] CVE's Sent. Waiting for {} minutes before next check...",
+                style(&config.time.to_string()).green()
+            );
 
-            // Update the list of previous CVE's for later comparison
             last_cves = cves;
-
-            // Update the last timestamp for the next check
             last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
             std::thread::sleep(std::time::Duration::from_secs(&config.time * 60));
         }
@@ -78,9 +63,8 @@ async fn check(last_timestamp: String) -> Vec<Cve> {
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     for i in json["vulnerabilities"].as_array().unwrap().iter() {
         let cve = Cve::new(
-            i["cve"]["id"].to_string(),
-            i["cve"]["descriptions"][0]["value"].to_string(),
-            i["cve"]["publishedDate"].to_string(),
+            i["cve"]["id"].as_str().unwrap().to_string(),
+            i["cve"]["descriptions"][0]["value"].as_str().unwrap().to_string(),
         );
 
         cves.push(cve);
@@ -89,21 +73,48 @@ async fn check(last_timestamp: String) -> Vec<Cve> {
 }
 
 fn message(webhook: &String, cves: &Vec<Cve>) {
-    // Instantiate Discord Webhook
-    let client = reqwest::Client::new();
-
-    // Create an embed of the new CVEs
-    let embed = json!({
-        "embeds": [
-            {
-                "title": "New CVEs",
-                "description": cves.iter().map(|cve| format!("[{}]({})", cve.id, cve.description)).collect::<Vec<String>>().join("\n"),
-                "color": 16711680
-            }
-        ]
+    // Instantiate JSON Object
+    let mut json = json!({
+        "username": "CVE Feed",
+        "content": "New CVE's Found!",
+        "embeds": []
     });
+    // Add CVE's to JSON Object
+    for cve in cves {
+        json["embeds"].as_array_mut().unwrap().push(json!({
+            "title": cve.id,
+            "description": cve.description.as_str(),
+            "url": format!("https://nvd.nist.gov/vuln/detail/{}", cve.id.as_str()),
+            "color": 185877,
+        }));
+    }
+    //Send the json to the Discord Webhook
+    let request = Client::new().post(webhook).json(&json).send();
+    match request {
+        Ok(_) => println!("[+] Message Sent!"),
+        Err(e) => println!("[-] Error Sending Message: {}", e),
+    }
+}
 
-    // Send the embed to the Discord Webhook
-    let result = client.post(webhook).json(&embed).send();
+fn filter(config: &Configuration, cves: Vec<Cve>, last_cves: Vec<Cve>) -> Vec<Cve> {
+    let cves: Vec<Cve> = cves
+        .into_iter()
+        .filter(|cve| {
+            !last_cves.contains(cve) && {
+                let keywords: Vec<&str> = config.keywords.split(",").collect();
+                for keyword in keywords {
+                    if cve.description.contains(keyword) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        })
+        .collect();
 
+    println!(
+        "[+] Found {} new CVEs. Sending to discord...",
+        style(cves.len().to_string()).green()
+    );
+    cves
 }
