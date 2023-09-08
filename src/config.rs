@@ -1,4 +1,21 @@
 use clap::Parser;
+use super::cve::Cve;
+
+pub struct State {
+    pub config: Configuration,
+    pub last_timestamp: String,
+    pub last_cves: Vec<Cve>,
+}
+
+impl State {
+    pub fn new() -> Self {
+        State {
+            config: Configuration::new(),
+            last_timestamp: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            last_cves: Vec::new(),
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -6,10 +23,6 @@ pub struct Configuration {
     // Path to Discord Webhook
     #[arg(short, long, help = "Discord Webhook URL", required = false, default_value = "")]
     pub webhook: String,
-
-    // Path to JSON Config File
-    #[arg(short, long, required = false, help = "The path to the JSON Config File", default_value = "")]
-    pub config_file_path: String,
 
     // Comma separated list of keywords
     #[arg(short, long, required = false, help = "A comma separated list of keywords to search for", default_value = "")]

@@ -1,3 +1,5 @@
+use crate::config::State;
+
 use super::config::Configuration;
 use super::cve::Cve;
 use console::style;
@@ -5,46 +7,47 @@ use reqwest::blocking::Client;
 use serde_json::json;
 
 pub fn run() {
+    // Instantiate application state to store config, last timestamp and last set of CVE's
+    let mut app_state = State::new();
 
-    // Instantiate Config & emtpy variables for comparison
-    let config = Configuration::new();
-    let start_time: String = String::from("2023-09-08T06:31:38Z");
-    let mut last_timestamp: String = start_time.clone();
-    let mut last_cves: Vec<Cve> = Vec::new();
-
-    println!("[+] Starting @ {}", style(start_time.clone()).green());
+    println!(
+        "[+] Starting @ {}",
+        style(app_state.last_timestamp.clone()).green()
+    );
 
     loop {
         // Check for CVEs
         println!("[+] Checking for new CVEs...");
-        let cves = check(last_timestamp.clone());
 
-        if cves.len() == 0 {
-            println!(
-                "[+] No new CVEs found. Waiting for {} minutes before next check...",
-                style(&config.time.to_string()).green()
-            );
-            last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            std::thread::sleep(std::time::Duration::from_secs(&config.time * 60));
-            continue;
-        } else {
-            // Filter CVEs & send new ones to Discord
-            let cves = filter(&config, cves, last_cves);
-            message(&config.webhook, &cves);
-            println!(
-                "[+] CVE's Sent. Waiting for {} minutes before next check...",
-                style(&config.time.to_string()).green()
-            );
+        // Query NIST for new CVEs
+        let cves = query_cves(app_state.last_timestamp.clone());
 
-            last_cves = cves;
-            last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-            std::thread::sleep(std::time::Duration::from_secs(&config.time * 60));
-        }
+        // Filter what we get back
+        let cves = filter(&app_state.config, cves, &app_state.last_cves);
+            match cves.len() {
+                0 => {
+                    println!("[+] No new or relevant CVE's found. Waiting for {} minutes before next check...", style(&app_state.config.time.to_string()).green());
+                    app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
+                    continue;
+                }
+                _ => {
+                    message(&app_state.config.webhook, &cves);
+                    println!(
+                        "[+] Sent {} new CVE's to Discord. Waiting for {} minutes before next check...",
+                        style(cves.len().to_string()).green(),
+                        style(&app_state.config.time.to_string()).green()
+                    );
+                    app_state.last_cves = cves;
+                    app_state.last_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    std::thread::sleep(std::time::Duration::from_secs(&app_state.config.time * 60));
+                }
+            }
     }
 }
 
 #[tokio::main]
-async fn check(last_timestamp: String) -> Vec<Cve> {
+async fn query_cves(last_timestamp: String) -> Vec<Cve> {
     // Instantiate CVE Vector
     let mut cves: Vec<Cve> = Vec::new();
 
@@ -59,17 +62,46 @@ async fn check(last_timestamp: String) -> Vec<Cve> {
     let result = reqwest::get(&url).await;
     let body = result.unwrap().text().await.unwrap();
 
-    // Handle Response
+    // Get ID and Description of each CVE
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     for i in json["vulnerabilities"].as_array().unwrap().iter() {
         let cve = Cve::new(
             i["cve"]["id"].as_str().unwrap().to_string(),
-            i["cve"]["descriptions"][0]["value"].as_str().unwrap().to_string(),
+            i["cve"]["descriptions"][0]["value"]
+                .as_str()
+                .unwrap()
+                .to_string(),
         );
 
         cves.push(cve);
     }
     cves
+}
+
+fn filter(config: &Configuration, cves: Vec<Cve>, last_cves: &Vec<Cve>) -> Vec<Cve> {
+    let cves: Vec<Cve> = cves
+        .into_iter()
+        .filter(|cve| {
+            // Doesn't contain any CVE's from the previous check
+            // TODO: Make sure it's not pushing the same CVE to the vector if it contains two of the keywords.
+            !last_cves.contains(cve) && {
+                let keywords: Vec<&str> = config.keywords.split(",").collect();
+                // Contains the keywords
+                for keyword in keywords {
+                    if cve
+                        .description
+                        .to_lowercase()
+                        .contains(keyword.to_lowercase().as_str())
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        })
+        .collect();
+
+    return cves;
 }
 
 fn message(webhook: &String, cves: &Vec<Cve>) {
@@ -94,27 +126,4 @@ fn message(webhook: &String, cves: &Vec<Cve>) {
         Ok(_) => println!("[+] Message Sent!"),
         Err(e) => println!("[-] Error Sending Message: {}", e),
     }
-}
-
-fn filter(config: &Configuration, cves: Vec<Cve>, last_cves: Vec<Cve>) -> Vec<Cve> {
-    let cves: Vec<Cve> = cves
-        .into_iter()
-        .filter(|cve| {
-            !last_cves.contains(cve) && {
-                let keywords: Vec<&str> = config.keywords.split(",").collect();
-                for keyword in keywords {
-                    if cve.description.contains(keyword) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-        })
-        .collect();
-
-    println!(
-        "[+] Found {} new CVEs. Sending to discord...",
-        style(cves.len().to_string()).green()
-    );
-    cves
 }
